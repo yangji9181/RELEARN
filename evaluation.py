@@ -52,7 +52,7 @@ def parse_args():
     parser.add_argument('-o', '--output_path', type=str, default='', help='output path')
 
     # general optimization para
-    parser.add_argument('-e', '--num_epoch', type=int, default=500, help='epoch number')
+    parser.add_argument('-e', '--num_epoch', type=int, default=100, help='epoch number')
     parser.add_argument('-b', '--batch_size', type=int, default=10, help='batch size')
     parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
 
@@ -80,7 +80,10 @@ def node_classification(args, embedding, file, repeat_times=5):
 
     test, _, _ = construct_feature(labeled_data, embedding)
 
-    for _ in range(repeat_times):
+    if len(non_ex_wrd) > 0:
+        print('found {} words not in embedding'.format(len(non_ex_wrd)))
+
+    for i in range(repeat_times):
         shuffle(train)
         shuffle(test)
 
@@ -120,10 +123,11 @@ def node_classification(args, embedding, file, repeat_times=5):
                 best_train_acc = train_acc
                 best_train_acc_epoch = epoch + 1
 
-                # print('\rEpoch:{}/{} train acc={}, test acc={}, best train acc={} @epoch:{}, best test acc={} @epoch:{}'.
-                #       format(epoch + 1, args.num_epoch, train_acc, test_acc, best_train_acc, best_train_acc_epoch, best_test_acc, best_test_acc_epoch), end='')
-                # sys.stdout.flush()
+            print('\repoch {}/{} train acc={}, test acc={}, best train acc={} @epoch:{}, best test acc={} @epoch:{}'.
+                  format(epoch + 1, args.num_epoch, train_acc, test_acc, best_train_acc, best_train_acc_epoch, best_test_acc, best_test_acc_epoch), end='')
+            sys.stdout.flush()
 
+        print('')
         best_train_accs.append(best_train_acc)
         best_test_accs.append(best_test_acc)
         best_train_acc_epochs.append(best_train_acc_epoch)
@@ -131,26 +135,32 @@ def node_classification(args, embedding, file, repeat_times=5):
 
     best_train_acc, best_train_acc_epoch, best_test_acc, best_test_acc_epoch = \
         np.mean(best_train_accs), np.mean(best_train_acc_epochs), np.mean(best_test_accs), np.mean(best_test_acc_epochs)
-    print('{}: best train acc={} @epoch:{}, best test acc={} @epoch:{}'.
-          format(file, best_train_acc, best_train_acc_epoch, best_test_acc, best_test_acc_epoch))
+    std = np.std(best_test_accs)
+    print('{}: best train acc={} @epoch:{}, best test acc={} += {} @epoch:{}'.
+          format(file, best_train_acc, best_train_acc_epoch, best_test_acc, std, best_test_acc_epoch))
 
-    return best_train_acc, best_test_acc, best_pred
+    return best_train_acc, best_test_acc, std
+
+
+non_ex_wrd = set()
 
 
 def construct_feature(data, w2v):
-    Data, labels, idx2word, non_ex_wrd = [], [], [], []
+    global non_ex_wrd
+    Data, labels, idx2word = [], [], []
     idx = 0
     for word1, word2, label in data:
         try:
             vector1 = w2v[word1]
-        except Exception:
-            non_ex_wrd.append(word1)
+        except:
+            non_ex_wrd.add(word1)
             continue
         try:
             vector2 = w2v[word2]
-        except Exception:
-            non_ex_wrd.append(word2)
+        except:
+            non_ex_wrd.add(word2)
             continue
+
         Data.append(np.concatenate([vector1, vector2]))
         labels.append(label)
 
@@ -160,8 +170,7 @@ def construct_feature(data, w2v):
         if word2 not in idx2word:
             idx2word.append(word2)
             idx += 1
-    # if len(non_ex_wrd) > 0:
-    #     print('found {} words not in embedding'.format(len(non_ex_wrd)))
+
     Data = np.concatenate((np.array(Data), np.array(labels)[:, np.newaxis]), axis=1)
     return Data, idx2word, non_ex_wrd
 
@@ -190,21 +199,21 @@ def repeated_evaluate(args):
             args.output_path = args.model_path + '.eva.tsv'
         print('saving results into', args.output_path)
 
-        w2v = gensim.models.KeyedVectors.load_word2vec_format(args.model_path, binary=True)
+        w2v = gensim.models.KeyedVectors.load_word2vec_format(args.model_path, binary=False)
 
         with open(args.output_path, 'w') as of:
             of.write("model file:\t{}\n".format(args.model_path))
-            of.write('task file\tbest train acc\tbest test acc\n')
+            of.write('task file\tbest train acc\tbest test acc\tbest test std\n')
 
             if osp.isfile(args.label_path):
                 task_file = args.label_path
-                best_train_acc, best_test_acc, best_preds = node_classification(args, embedding=w2v, file=task_file)
-                of.write('{}\t{}\t{}\n'.format(task_file, best_train_acc, best_test_acc))
+                best_train_acc, best_test_acc, best_test_std = node_classification(args, embedding=w2v, file=task_file)
+                of.write('{}\t{}\t{}\t{}\n'.format(task_file, best_train_acc, best_test_acc, best_test_std))
             else:
                 for file in os.listdir(args.label_path):
                     task_file = osp.join(args.label_path, file)
-                    best_train_acc, best_test_acc, best_preds = node_classification(args, embedding=w2v, file=task_file)
-                    of.write('{}\t{}\t{}\n'.format(file, best_train_acc, best_test_acc))
+                    best_train_acc, best_test_acc, best_test_std = node_classification(args, embedding=w2v, file=task_file)
+                    of.write('{}\t{}\t{}\t{}\n'.format(task_file, best_train_acc, best_test_acc, best_test_std))
 
     elif osp.isdir(args.model_path):
         print('=' * 100)
@@ -214,13 +223,13 @@ def repeated_evaluate(args):
         print('saving results into', args.output_path)
 
         with open(args.output_path, 'w') as of:
-            of.write('model file\ttask file\tbest train acc\tbest test acc\n')
+            of.write('model file\ttask file\tbest train acc\tbest test acc\tbest test std\n')
 
             task_accs = defaultdict(list)
             for file in os.listdir(args.model_path):
                 file = osp.join(args.model_path, file)
                 try :
-                    w2v = gensim.models.KeyedVectors.load_word2vec_format(file, binary=True)
+                    w2v = gensim.models.KeyedVectors.load_word2vec_format(file, binary=False)
                 except ValueError as e:
                     # print('{} may not be a w2v file'.format(file))
                     continue
@@ -229,19 +238,15 @@ def repeated_evaluate(args):
 
                 if osp.isfile(args.label_path):
                     task_file = args.label_path
-                    best_train_acc, best_test_acc, best_preds = node_classification(args, embedding=w2v, file=task_file)
+                    best_train_acc, best_test_acc, best_test_std = node_classification(args, embedding=w2v, file=task_file)
                     task_accs[task_file].append(best_test_acc)
-                    of.write('{}\t{}\t{}\n'.format(task_file, best_train_acc, best_test_acc))
+                    of.write('{}\t{}\t{}\t{}\n'.format(task_file, best_train_acc, best_test_acc, best_test_std))
                 else:
                     for file in os.listdir(args.label_path):
                         task_file = osp.join(args.label_path, file)
-                        best_train_acc, best_test_acc, best_preds = node_classification(args, embedding=w2v, file=task_file)
+                        best_train_acc, best_test_acc, best_test_std = node_classification(args, embedding=w2v, file=task_file)
                         task_accs[task_file].append(best_test_acc)
-                        of.write('{}\t{}\t{}\n'.format(file, best_train_acc, best_test_acc))
-
-            of.write('task file\tmean\tstd\n')
-            for task_file, accs in task_accs.items():
-                of.write('{}\t{}\t{}\n'.format(task_file, np.mean(accs), np.std(accs)))
+                        of.write('{}\t{}\t{}\t{}\n'.format(task_file, best_train_acc, best_test_acc, best_test_std))
 
 
 if __name__ == '__main__':
