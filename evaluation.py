@@ -6,6 +6,9 @@ import numpy as np
 from random import shuffle
 from tqdm import tqdm, trange
 from collections import defaultdict, namedtuple
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -47,11 +50,12 @@ def parse_args():
     parser = argparse.ArgumentParser()
     # general para
     parser.add_argument('-g', '--gpu', type=int, default=-1, help='gpu id')
-    parser.add_argument('-d', '--label_path', type=str, default='data/RELEARN_data/rel.txt', help='data path')
+    parser.add_argument('-d', '--label_path', type=str, default='data/rel1.txt', help='data path')
     parser.add_argument('-m', '--model_path', type=str, default='baseline/baseline.sub.line.txt', help='model path')
     parser.add_argument('-o', '--output_path', type=str, default='', help='output path')
 
     # general optimization para
+    parser.add_argument("--method", type=str, default='LR', help='evaluation method', choices=['MLP', 'SVM', 'LR'])
     parser.add_argument('-e', '--num_epoch', type=int, default=100, help='epoch number')
     parser.add_argument('-b', '--batch_size', type=int, default=10, help='batch size')
     parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
@@ -61,7 +65,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def node_classification(args, embedding, file, repeat_times=5):
+def node_classification(args, embedding, file, repeat_times=10):
     best_train_accs, best_test_accs = [], []
     best_train_acc_epochs, best_test_acc_epochs = [], []
     labels, labeled_data = set(), []
@@ -83,61 +87,96 @@ def node_classification(args, embedding, file, repeat_times=5):
     if len(non_ex_wrd) > 0:
         print('found {} words not in embedding'.format(len(non_ex_wrd)))
 
-    for i in range(repeat_times):
-        shuffle(train)
-        shuffle(test)
+    if args.method == 'MLP':
+        for i in range(repeat_times):
+            np.random.shuffle(train)
 
-        X_train, y_train = torch.FloatTensor(train[:, :-1]), torch.LongTensor(train[:, -1])
-        X_test, y_test = torch.FloatTensor(test[:,:-1]), torch.LongTensor(test[:,-1])
-        dataloader = DataLoader(EvaDataset(X_train, y_train), batch_size=args.batch_size, shuffle=True)
-        X_train = X_train.to(args.device)
-        X_test = X_test.to(args.device)
-        y_train = y_train.to(args.device)
-        y_test = y_test.to(args.device)
+            X_train, y_train = torch.FloatTensor(train[:, :-1]), torch.LongTensor(train[:, -1])
+            X_test, y_test = torch.FloatTensor(test[:,:-1]), torch.LongTensor(test[:,-1])
+            dataloader = DataLoader(EvaDataset(X_train, y_train), batch_size=args.batch_size, shuffle=True)
+            X_train = X_train.to(args.device)
+            X_test = X_test.to(args.device)
+            y_train = y_train.to(args.device)
+            y_test = y_test.to(args.device)
 
-        kwargs = {
-            'input_dim': X_train.size(1),
-            'hidden_dim': args.hidden_layer_dim,
-            'output_dim': output_dim
-        }
-        model = MLP(**kwargs).to(args.device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+            kwargs = {
+                'input_dim': X_train.size(1),
+                'hidden_dim': args.hidden_layer_dim,
+                'output_dim': output_dim
+            }
+            model = MLP(**kwargs).to(args.device)
+            optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-        best_test_acc, best_train_acc = 0, 0
-        best_test_acc_epoch, best_train_acc_epoch = 0, 0
-        for epoch in range(args.num_epoch):
-            for i, (batch, label) in enumerate(dataloader):
-                optimizer.zero_grad()
-                loss = model(batch.to(args.device), label.to(args.device))
-                loss.backward()
-                optimizer.step()
+            best_test_acc, best_train_acc = 0, 0
+            best_test_acc_epoch, best_train_acc_epoch = 0, 0
+            for epoch in range(args.num_epoch):
+                for i, (batch, label) in enumerate(dataloader):
+                    optimizer.zero_grad()
+                    loss = model(batch.to(args.device), label.to(args.device))
+                    loss.backward()
+                    optimizer.step()
 
-            preds, test_acc = model.predict(X_test, y_test)
-            if test_acc > best_test_acc:
-                best_test_acc = test_acc
-                best_test_acc_epoch = epoch + 1
-                best_pred = preds
+                preds, test_acc = model.predict(X_test, y_test)
+                if test_acc > best_test_acc:
+                    best_test_acc = test_acc
+                    best_test_acc_epoch = epoch + 1
+                    best_pred = preds
 
-            _, train_acc = model.predict(X_train, y_train)
-            if train_acc > best_train_acc:
-                best_train_acc = train_acc
-                best_train_acc_epoch = epoch + 1
+                _, train_acc = model.predict(X_train, y_train)
+                if train_acc > best_train_acc:
+                    best_train_acc = train_acc
+                    best_train_acc_epoch = epoch + 1
 
-            print('\repoch {}/{} train acc={}, test acc={}, best train acc={} @epoch:{}, best test acc={} @epoch:{}'.
-                  format(epoch + 1, args.num_epoch, train_acc, test_acc, best_train_acc, best_train_acc_epoch, best_test_acc, best_test_acc_epoch), end='')
-            sys.stdout.flush()
+                print('\repoch {}/{} train acc={}, test acc={}, best train acc={} @epoch:{}, best test acc={} @epoch:{}'.
+                      format(epoch + 1, args.num_epoch, train_acc, test_acc, best_train_acc, best_train_acc_epoch, best_test_acc, best_test_acc_epoch), end='')
+                sys.stdout.flush()
 
-        print('')
-        best_train_accs.append(best_train_acc)
-        best_test_accs.append(best_test_acc)
-        best_train_acc_epochs.append(best_train_acc_epoch)
-        best_test_acc_epochs.append(best_test_acc_epoch)
+            print('')
+            best_train_accs.append(best_train_acc)
+            best_test_accs.append(best_test_acc)
+            best_train_acc_epochs.append(best_train_acc_epoch)
+            best_test_acc_epochs.append(best_test_acc_epoch)
 
-    best_train_acc, best_train_acc_epoch, best_test_acc, best_test_acc_epoch = \
-        np.mean(best_train_accs), np.mean(best_train_acc_epochs), np.mean(best_test_accs), np.mean(best_test_acc_epochs)
-    std = np.std(best_test_accs)
-    print('{}: best train acc={} @epoch:{}, best test acc={} += {} @epoch:{}'.
-          format(file, best_train_acc, best_train_acc_epoch, best_test_acc, std, best_test_acc_epoch))
+        best_train_acc, best_train_acc_epoch, best_test_acc, best_test_acc_epoch = \
+            np.mean(best_train_accs), np.mean(best_train_acc_epochs), np.mean(best_test_accs), np.mean(best_test_acc_epochs)
+        std = np.std(best_test_accs)
+        print('{}: best train acc={} @epoch:{}, best test acc={} += {} @epoch:{}'.
+              format(file, best_train_acc, best_train_acc_epoch, best_test_acc, std, best_test_acc_epoch))
+
+    elif args.method == 'LR':
+        for i in range(repeat_times):
+            np.random.shuffle(train)
+            X = train[:, :-1]
+            y = train[:, -1]
+            clf = LogisticRegression(solver='lbfgs', multi_class='multinomial').fit(X, y)
+            train_pred = clf.predict(X)
+            test_pred = clf.predict(test[:, :-1])
+            best_train_acc = sum(train_pred==y) / len(y)
+            best_test_acc = sum(test_pred==test[:, -1]) / len(test_pred)
+            best_train_accs.append(best_train_acc)
+            best_test_accs.append(best_test_acc)
+            print('{}: train acc={}, test acc={}'.format(i, best_train_acc, best_test_acc))
+            del clf
+
+        best_train_acc, best_test_acc, std = np.mean(best_train_accs), np.mean(best_test_accs), np.std(best_test_accs)
+        print('{}: best train acc={}, best test acc={} += {}'.format(file, best_train_acc, best_test_acc, std))
+
+    elif args.method == 'SVM':
+        for i in range(repeat_times):
+            np.random.shuffle(train)
+            X = train[:, :-1]
+            y = train[:, -1]
+            clf = SVC().fit(X, y)
+            train_pred = clf.predict(X)
+            test_pred = clf.predict(test[:, :-1])
+            best_train_acc = sum(train_pred==y) / len(y)
+            best_test_acc = sum(test_pred==test[:, -1]) / len(test_pred)
+            best_train_accs.append(best_train_acc)
+            best_test_accs.append(best_test_acc)
+            print('{}: train acc={}, test acc={}'.format(i, best_train_acc, best_test_acc))
+
+        best_train_acc, best_test_acc, std = np.mean(best_train_accs), np.mean(best_test_accs), np.std(best_test_accs)
+        print('{}: best train acc={}, best test acc={} += {}'.format(file, best_train_acc, best_test_acc, std))
 
     return best_train_acc, best_test_acc, std
 
