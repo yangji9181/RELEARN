@@ -1,5 +1,0 @@
-pygcn.egg-info/PKG-INFO
-pygcn.egg-info/SOURCES.txt
-pygcn.egg-info/dependency_links.txt
-pygcn.egg-info/requires.txt
-pygcn.egg-info/top_level.txt

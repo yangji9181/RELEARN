@@ -1,46 +1,34 @@
-Graph Convolutional Networks in PyTorch
-====
+RELEARN
+---------------
 
-PyTorch implementation of Graph Convolutional Networks (GCNs) for semi-supervised classification [1].
+Code for the paper "...." KDD 2019
 
-For a high-level introduction to GCNs, see:
 
-Thomas Kipf, [Graph Convolutional Networks](http://tkipf.github.io/graph-convolutional-networks/) (2016)
+Command
+---------------
 
-![Graph Convolutional Networks](figure.png)
+To train an RELEARN model with default setting, please see **run.sh**
 
-Note: There are subtle differences between the TensorFlow implementation in https://github.com/tkipf/gcn and this PyTorch re-implementation. This re-implementation serves as a proof of concept and is not intended for reproduction of the results reported in [1].
+Key Parameters
+---------------
 
-This implementation makes use of the Cora dataset from [2].
+**sample_mode**: there are 4 type of loss, each one correspond to one component of sample mode. **n** is node feature reconstruct loss,  **l** is link prediction loss, **dc** is diffusion content reconstruction loss, **ds** is diffusion structure(link) prediction loss.
 
-## Installation
+**diffusion_threshold**: filter out diffusion which contain nodes less than this threshold.
 
-```python setup.py install```
+**neighbor_sample_size**: how many neighbor to aggregate in GCN layer.
 
-## Requirements
+**sample_size**: how many data to be used in one epoch for each sample mode. Note that for the two link prediction loss, sample size is the sum of positive sample size and negative sample size.
 
-  * PyTorch 0.4 or 0.5
-  * Python 2.7 or 3.6
+**negative_sample_size**: it is negative sample / positive sample.
 
-## Usage
+**sample_embed**: the dimension of hidden state, also the dimension of learned embedding.
 
-```python train.py```
+**relation**: number of relations to be used in variational inference.
 
-## References
+**use_superv**: whether to add supervision in trainig.
 
-[1] [Kipf & Welling, Semi-Supervised Classification with Graph Convolutional Networks, 2016](https://arxiv.org/abs/1609.02907)
+**superv_ratio**: how many supervision to add, used in label efficiency experiments.
 
-[2] [Sen et al., Collective Classification in Network Data, AI Magazine 2008](http://linqs.cs.umd.edu/projects/projects/lbc/)
+**a, b, c, d**: weights for different loss, main hyper-parameter to tune in practice.
 
-## Cite
-
-Please cite our paper if you use this code in your own work:
-
-```
-@article{kipf2016semi,
-  title={Semi-Supervised Classification with Graph Convolutional Networks},
-  author={Kipf, Thomas N and Welling, Max},
-  journal={arXiv preprint arXiv:1609.02907},
-  year={2016}
-}
-```
